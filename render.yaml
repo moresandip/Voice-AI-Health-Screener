@@ -1,0 +1,14 @@
+services:
+  # ─── Backend: Node.js WebSocket + Express API ───────────────────────────────
+  - type: web
+    name: voice-health-screener-server
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm run start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: OPENAI_API_KEY
+        sync: false   # Set this manually in Render dashboard → Environment
+    healthCheckPath: /health

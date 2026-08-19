@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 
-const WEBSOCKET_URL = 'ws://localhost:5000';
+// In production, set VITE_WS_URL to your Render backend URL (e.g. wss://your-app.onrender.com)
+// In development, falls back to localhost
+const WEBSOCKET_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:5000';
 
 export function useWebSocket() {
   const [status, setStatus] = useState('IDLE'); // IDLE, CONNECTING, LISTENING, THINKING, SPEAKING, DISCONNECTED
