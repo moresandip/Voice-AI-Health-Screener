@@ -214,6 +214,17 @@ export function useWebSocket() {
     }
   };
 
+  const sendText = (text) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        event: 'USER_TEXT',
+        text
+      }));
+    } else {
+      console.error('Cannot send text: WebSocket is closed.');
+    }
+  };
+
   // Clean up on component unmount
   useEffect(() => {
     return () => {
@@ -237,6 +248,7 @@ export function useWebSocket() {
     error,
     startCall,
     endCall,
-    sendAudio
+    sendAudio,
+    sendText
   };
 }

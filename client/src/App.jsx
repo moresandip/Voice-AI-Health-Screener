@@ -14,8 +14,11 @@ function App() {
     error,
     startCall,
     endCall,
-    sendAudio
+    sendAudio,
+    sendText
   } = useWebSocket();
+
+  const [inputText, setInputText] = useState('');
 
   // Triggered when recorded user audio buffer is packaged as base64
   const handleAudioReady = (base64Audio, mimeType) => {
@@ -28,6 +31,13 @@ function App() {
     startRecording,
     stopRecording
   } = useAudioRecorder(handleAudioReady);
+
+  const handleSendText = (e) => {
+    e.preventDefault();
+    if (!inputText.trim()) return;
+    sendText(inputText);
+    setInputText('');
+  };
 
   const handleReset = () => {
     // Simply reload the page or redirect to clean states
@@ -103,7 +113,26 @@ function App() {
 
             {/* Right Panel: Live Transcript */}
             <div className="panel-right">
-              <Transcript transcript={transcript} status={status} />
+              <div className="transcript-box-wrapper">
+                <Transcript transcript={transcript} status={status} />
+              </div>
+              
+              {status === 'LISTENING' && (
+                <form onSubmit={handleSendText} className="chat-input-form glass-panel fade-in">
+                  <input
+                    type="text"
+                    placeholder="Type here (e.g. My name is Sandip)..."
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    className="chat-input"
+                  />
+                  <button type="submit" className="btn btn-primary btn-send">
+                    <svg className="send-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                  </button>
+                </form>
+              )}
             </div>
           </div>
         ) : (

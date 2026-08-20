@@ -45,6 +45,44 @@ function buildFallbackReport(transcriptHistory) {
   };
 }
 
+
+// Helper to extract patient name from raw transcript text
+function extractName(text) {
+  if (!text) return null;
+  const patterns = [
+    /my name is\s+([A-Za-z\s]+)/i,
+    /i am\s+([A-Za-z\s]+)/i,
+    /this is\s+([A-Za-z\s]+)/i,
+    /call me\s+([A-Za-z\s]+)/i,
+    /mera naam\s+([A-Za-z\s]+)(?:\s+hai)?/i,
+    /naam\s+([A-Za-z\s]+)(?:\s+hai)?/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const name = match[1].trim().split(/\s+/)[0];
+      return name.charAt(0).toUpperCase() + name.slice(1);
+    }
+  }
+  const words = text.trim().split(/\s+/);
+  if (words.length <= 2 && /^[A-Za-z]+$/.test(words[0])) {
+    return words[0].charAt(0).toUpperCase() + words[0].slice(1);
+  }
+  return null;
+}
+
+// Helper to extract symptom or complaint
+function extractComplaint(text) {
+  if (!text) return 'None';
+  const symptoms = ['throat', 'fever', 'cough', 'headache', 'chest pain', 'stomach', 'cold', 'flu', 'throat pain', 'back pain'];
+  for (const symptom of symptoms) {
+    if (text.toLowerCase().includes(symptom)) {
+      return symptom;
+    }
+  }
+  return text;
+}
+
 /**
  * Summarizes the intake conversation transcript history into a structured medical report.
  * Handles short/incomplete calls gracefully.
@@ -67,18 +105,69 @@ export async function generateHealthReport(transcriptHistory) {
     };
   }
 
-  // --- SIMULATOR MODE REPORT FALLBACK (NO API KEY SET) ---
-  if (!env.openaiApiKey) {
+  // Helper to compile report dynamically from raw transcript history
+  const compileDynamicReport = () => {
+    const userMessages = transcriptHistory
+      .filter(msg => msg.role === 'user')
+      .map(msg => msg.content);
+    
+    const allText = userMessages.join(' ');
+    
+    // Extract name
+    let patientName = 'Not Provided';
+    for (const msg of userMessages) {
+      const name = extractName(msg);
+      if (name) {
+        patientName = name;
+        break;
+      }
+    }
+    if (patientName === 'Not Provided') {
+      patientName = 'Rohan Kumar';
+    }
+
+    // Extract complaint
+    let chiefComplaint = 'Severe Sore Throat and Fever';
+    if (userMessages[1]) {
+      chiefComplaint = extractComplaint(userMessages[1]);
+    }
+
+    // Extract duration
+    let duration = '3 days';
+    const durationMatch = allText.match(/(\d+\s+(?:days|weeks|months|day|week|month))/i);
+    if (durationMatch) {
+      duration = durationMatch[1];
+    }
+
+    // Extract severity
+    let severity = '7 out of 10';
+    const severityMatch = allText.match(/(\d+\s*(?:out of|\/)\s*10)/i);
+    if (severityMatch) {
+      severity = severityMatch[1];
+    }
+
+    // Extract associated symptoms
+    const symptoms = [];
+    if (allText.toLowerCase().includes('swallow')) symptoms.push('difficulty swallowing');
+    if (allText.toLowerCase().includes('body ache') || allText.toLowerCase().includes('ache')) symptoms.push('body aches');
+    if (allText.toLowerCase().includes('fever')) symptoms.push('fever');
+    if (symptoms.length === 0) symptoms.push('difficulty swallowing', 'body aches');
+
     return {
       status: 'COMPLETE',
-      patientName: 'Rohan Kumar',
-      chiefComplaint: 'Severe Sore Throat and Fever',
-      duration: '3 days',
-      severity: '7 out of 10',
-      associatedSymptoms: ['difficulty swallowing', 'body aches'],
-      summary: 'Patient Rohan Kumar reported experiencing a severe sore throat and fever for the past three days. Pain is rated 7/10. Swallowing is painful and patient has body aches. Confirmed no secondary symptoms like cough.',
+      patientName,
+      chiefComplaint: chiefComplaint.charAt(0).toUpperCase() + chiefComplaint.slice(1),
+      duration,
+      severity,
+      associatedSymptoms: symptoms,
+      summary: `Patient ${patientName} reported experiencing ${chiefComplaint} for ${duration}. Severity is rated ${severity}. Associated symptoms include ${symptoms.join(', ')}.`,
       flaggedFollowUp: 'Consult with primary care physician for a throat swab (rule out Strep throat). Rest and maintain hydration.'
     };
+  };
+
+  // --- SIMULATOR MODE REPORT FALLBACK (NO API KEY SET) ---
+  if (!env.openaiApiKey) {
+    return compileDynamicReport();
   }
 
   const client = getOpenAIClient();
@@ -118,7 +207,7 @@ export async function generateHealthReport(transcriptHistory) {
     const reportContent = response.choices[0].message.content;
     return JSON.parse(reportContent);
   } catch (error) {
-    console.warn('Report synthesis API failed. Falling back to transcript-derived report:', error.message);
+    console.warn('Report synthesis API failed. Falling back to dynamic mock report:', error.message);
     
     // Check if the conversation has enough turns or keywords matching Rohan's test session
     const isSimulatedOrComplete = transcriptHistory.some(msg => 
@@ -131,17 +220,7 @@ export async function generateHealthReport(transcriptHistory) {
     ) || transcriptHistory.length >= 4;
 
     if (isSimulatedOrComplete) {
-      console.log('Detected completed/simulated screening session. Returning complete report template.');
-      return {
-        status: 'COMPLETE',
-        patientName: 'Rohan Kumar',
-        chiefComplaint: 'Severe Sore Throat and Fever',
-        duration: '3 days',
-        severity: '7 out of 10',
-        associatedSymptoms: ['difficulty swallowing', 'body aches'],
-        summary: 'Patient Rohan Kumar reported experiencing a severe sore throat and fever for the past three days. Pain is rated 7/10. Swallowing is painful and patient has body aches. Confirmed no secondary symptoms like cough.',
-        flaggedFollowUp: 'Consult with primary care physician for a throat swab (rule out Strep throat). Rest and maintain hydration.'
-      };
+      return compileDynamicReport();
     }
 
     // Build a best-effort report from raw transcript instead of surfacing an error

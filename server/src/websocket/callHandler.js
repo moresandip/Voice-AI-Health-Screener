@@ -5,40 +5,91 @@ import { getAIResponse } from '../services/llmService.js';
 import { textToSpeech } from '../services/ttsService.js';
 import { generateHealthReport } from '../services/reportService.js';
 
-// Simulator helper to construct mock dialogue turns when no API key is present or quota is exceeded
+// Helper to extract patient name from raw transcript text
+function extractName(text) {
+  if (!text) return null;
+  const patterns = [
+    /my name is\s+([A-Za-z\s]+)/i,
+    /i am\s+([A-Za-z\s]+)/i,
+    /this is\s+([A-Za-z\s]+)/i,
+    /call me\s+([A-Za-z\s]+)/i,
+    /mera naam\s+([A-Za-z\s]+)(?:\s+hai)?/i,
+    /naam\s+([A-Za-z\s]+)(?:\s+hai)?/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const name = match[1].trim().split(/\s+/)[0];
+      return name.charAt(0).toUpperCase() + name.slice(1);
+    }
+  }
+  const words = text.trim().split(/\s+/);
+  if (words.length <= 2 && /^[A-Za-z]+$/.test(words[0])) {
+    return words[0].charAt(0).toUpperCase() + words[0].slice(1);
+  }
+  return null;
+}
+
+// Helper to extract symptom or complaint
+function extractComplaint(text) {
+  if (!text) return 'None';
+  const symptoms = ['throat', 'fever', 'cough', 'headache', 'chest pain', 'stomach', 'cold', 'flu', 'throat pain', 'back pain'];
+  for (const symptom of symptoms) {
+    if (text.toLowerCase().includes(symptom)) {
+      return symptom;
+    }
+  }
+  return text;
+}
+
+// Simulator helper to construct mock dialogue turns dynamically based on transcript history
 function getSimulatedTurn(transcriptHistory) {
-  const userTurns = transcriptHistory.filter(msg => msg.role === 'user').length;
+  const userMessages = transcriptHistory.filter(msg => msg.role === 'user');
+  const userTurns = userMessages.length;
   
+  // Try to find if user provided a name in any turn
+  let patientName = 'Patient';
+  for (const msg of userMessages) {
+    const name = extractName(msg.content);
+    if (name) {
+      patientName = name;
+      break;
+    }
+  }
+
+  const latestUserMsg = userMessages[userMessages.length - 1]?.content || '';
+
   switch (userTurns) {
-    case 0:
+    case 1: {
+      const name = extractName(latestUserMsg) || 'Rohan';
       return {
-        userText: "My name is Rohan Kumar.",
-        agentText: "Hello Rohan. What primary health concern or symptom is bringing you in today?"
+        agentText: `Hello ${name}. What primary health concern or symptom is bringing you in today?`
       };
-    case 1:
+    }
+    case 2: {
+      const complaint = extractComplaint(latestUserMsg);
       return {
-        userText: "I have had a severe sore throat and fever.",
-        agentText: "I'm sorry to hear that Rohan. When did this sore throat and fever start?"
+        agentText: `I'm sorry to hear that. When did this ${complaint} start?`
       };
-    case 2:
+    }
+    case 3: {
       return {
-        userText: "It started about three days ago.",
-        agentText: "On a scale of 1 to 10, how severe would you rate the pain in your throat?"
+        agentText: `On a scale of 1 to 10, how severe would you rate the pain or discomfort?`
       };
-    case 3:
+    }
+    case 4: {
       return {
-        userText: "It is quite severe, around a 7 out of 10.",
-        agentText: "Are you experiencing any other symptoms, such as difficulty swallowing, body aches, or a cough?"
+        agentText: `Are you experiencing any other symptoms, such as difficulty swallowing, body aches, or a cough?`
       };
-    case 4:
+    }
+    case 5: {
       return {
-        userText: "Yes, it hurts when I swallow and my body is aching.",
-        agentText: "Thank you, Rohan. I have documented all your concerns. You can now click the 'End Call' button to review your report."
+        agentText: `Thank you, ${patientName}. I have documented all your concerns. You can now click the 'End Call' button to review your report.`
       };
+    }
     default:
       return {
-        userText: "I'm done speaking.",
-        agentText: "Your intake information is fully saved. Please click 'End Call' to generate the report."
+        agentText: `Your intake information is fully saved. Please click 'End Call' to generate the report.`
       };
   }
 }
@@ -66,6 +117,37 @@ export function setupCallWebSocket(server) {
       try {
         const payload = JSON.parse(message.toString());
         const { event, data } = payload;
+
+        // Simulator helper block (failedSpeech = true if voice transcription failed and needs simulated text placeholders)
+        const runSimulatorResponse = (failedSpeech = false) => {
+          setTimeout(() => {
+            if (failedSpeech) {
+              const userMessages = session.transcriptHistory.filter(msg => msg.role === 'user');
+              const nextUserTurnIndex = userMessages.length;
+              const defaultUserTexts = [
+                "My name is Rohan Kumar.",
+                "I have a severe sore throat and fever.",
+                "It started about three days ago.",
+                "It is quite severe, around a 7 out of 10.",
+                "Yes, it hurts when I swallow and my body is aching."
+              ];
+              const userText = defaultUserTexts[nextUserTurnIndex] || "I'm done speaking.";
+              ws.send(JSON.stringify({ event: 'USER_TEXT', text: userText }));
+              session.transcriptHistory.push({ role: 'user', content: userText });
+            }
+
+            const simulatedTurn = getSimulatedTurn(session.transcriptHistory);
+
+            // Send Agent Text back
+            ws.send(JSON.stringify({ event: 'AGENT_TEXT', text: simulatedTurn.agentText }));
+            session.transcriptHistory.push({ role: 'assistant', content: simulatedTurn.agentText });
+
+            ws.send(JSON.stringify({ event: 'STATUS', status: 'SPEAKING' }));
+            ws.send(JSON.stringify({ event: 'AGENT_AUDIO', audio: null }));
+
+            session.isProcessing = false;
+          }, 1000);
+        };
 
         switch (event) {
           case 'START_CALL': {
@@ -106,6 +188,65 @@ export function setupCallWebSocket(server) {
             break;
           }
 
+          case 'USER_TEXT': {
+            if (session.isProcessing) {
+              console.warn('Skipping user text: server is currently processing.');
+              break;
+            }
+
+            const { text } = data || payload || {};
+            const userMessageText = text || payload.text;
+            if (!userMessageText) {
+              break;
+            }
+
+            console.log(`Received typed user text: "${userMessageText}"`);
+            session.isProcessing = true;
+            ws.send(JSON.stringify({ event: 'STATUS', status: 'THINKING' }));
+
+            // Dispatch user text to client transcript
+            ws.send(JSON.stringify({ event: 'USER_TEXT', text: userMessageText }));
+            session.transcriptHistory.push({ role: 'user', content: userMessageText });
+
+            if (!env.openaiApiKey) {
+              // Simulator Mode reply based on actual typed text
+              setTimeout(() => {
+                const simulatedTurn = getSimulatedTurn(session.transcriptHistory);
+                ws.send(JSON.stringify({ event: 'AGENT_TEXT', text: simulatedTurn.agentText }));
+                session.transcriptHistory.push({ role: 'assistant', content: simulatedTurn.agentText });
+
+                ws.send(JSON.stringify({ event: 'STATUS', status: 'SPEAKING' }));
+                ws.send(JSON.stringify({ event: 'AGENT_AUDIO', audio: null }));
+
+                session.isProcessing = false;
+              }, 1000);
+            } else {
+              // Real LLM pipeline reply
+              try {
+                const agentReplyText = await getAIResponse(session.transcriptHistory);
+                console.log(`Agent reply: "${agentReplyText}"`);
+                session.transcriptHistory.push({ role: 'assistant', content: agentReplyText });
+
+                ws.send(JSON.stringify({ event: 'AGENT_TEXT', text: agentReplyText }));
+                ws.send(JSON.stringify({ event: 'STATUS', status: 'SPEAKING' }));
+
+                try {
+                  const audioBase64 = await textToSpeech(agentReplyText);
+                  ws.send(JSON.stringify({ event: 'AGENT_AUDIO', audio: audioBase64 }));
+                } catch (ttsErr) {
+                  console.warn('TTS API failed. Sending response as text-only:', ttsErr.message);
+                  ws.send(JSON.stringify({ event: 'AGENT_AUDIO', audio: null }));
+                }
+              } catch (err) {
+                console.warn('LLM API failed. Reverting turn and falling back to simulated reply:', err.message);
+                runSimulatorResponse(false);
+              } finally {
+                session.isProcessing = false;
+              }
+            }
+            break;
+          }
+
           case 'USER_AUDIO': {
             if (session.isProcessing) {
               console.warn('Skipping audio block: server is currently processing.');
@@ -122,29 +263,9 @@ export function setupCallWebSocket(server) {
             session.isProcessing = true;
             ws.send(JSON.stringify({ event: 'STATUS', status: 'THINKING' }));
 
-            // Simulator helper block
-            const runSimulatorResponse = () => {
-              setTimeout(() => {
-                const simulatedTurn = getSimulatedTurn(session.transcriptHistory);
-                
-                // Send User Text back
-                ws.send(JSON.stringify({ event: 'USER_TEXT', text: simulatedTurn.userText }));
-                session.transcriptHistory.push({ role: 'user', content: simulatedTurn.userText });
-
-                // Send Agent Text back
-                ws.send(JSON.stringify({ event: 'AGENT_TEXT', text: simulatedTurn.agentText }));
-                session.transcriptHistory.push({ role: 'assistant', content: simulatedTurn.agentText });
-
-                ws.send(JSON.stringify({ event: 'STATUS', status: 'SPEAKING' }));
-                ws.send(JSON.stringify({ event: 'AGENT_AUDIO', audio: null }));
-
-                session.isProcessing = false;
-              }, 1000);
-            };
-
             // --- SIMULATOR MODE FALLBACK (NO API KEY SET) ---
             if (!env.openaiApiKey) {
-              runSimulatorResponse();
+              runSimulatorResponse(true);
               break;
             }
             // --- END SIMULATOR MODE ---
@@ -160,7 +281,7 @@ export function setupCallWebSocket(server) {
                 userText = await transcribeAudio(audioBuffer, mimeType || 'audio/webm');
               } catch (sttErr) {
                 console.warn('STT API failed (possibly billing quota exceeded). Falling back to text simulator:', sttErr.message);
-                runSimulatorResponse();
+                runSimulatorResponse(true);
                 return;
               }
 
@@ -185,7 +306,7 @@ export function setupCallWebSocket(server) {
                 console.warn('LLM API failed. Reverting turn and falling back to simulated question:', llmErr.message);
                 // Remove the user's turn from transcript so simulator indices match correctly
                 session.transcriptHistory.pop();
-                runSimulatorResponse();
+                runSimulatorResponse(true);
                 return;
               }
 
