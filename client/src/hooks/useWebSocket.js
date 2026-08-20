@@ -14,6 +14,7 @@ export function useWebSocket() {
   const audioQueueRef = useRef([]);
   const isPlayingRef = useRef(false);
   const currentAudioRef = useRef(null);
+  const latestAgentTextRef = useRef('');
 
   // Play next audio snippet in queue sequentially
   const playNextAudio = () => {
@@ -111,14 +112,40 @@ export function useWebSocket() {
             break;
 
           case 'AGENT_TEXT':
+            latestAgentTextRef.current = text;
             setTranscript((prev) => [...prev, { role: 'assistant', content: text }]);
             break;
 
           case 'AGENT_AUDIO':
             if (!audio) {
-              // Immediately notify server that playback is finished when no audio is sent (Simulator Mode fallback)
-              if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-                socketRef.current.send(JSON.stringify({ event: 'CLIENT_PLAYBACK_FINISHED' }));
+              // Try to speak using browser native SpeechSynthesis when API audio is unavailable
+              if ('speechSynthesis' in window && latestAgentTextRef.current) {
+                setStatus('SPEAKING');
+                window.speechSynthesis.cancel(); // Cancel any ongoing speech
+                
+                const utterance = new SpeechSynthesisUtterance(latestAgentTextRef.current);
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                
+                utterance.onend = () => {
+                  if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                    socketRef.current.send(JSON.stringify({ event: 'CLIENT_PLAYBACK_FINISHED' }));
+                  }
+                };
+                
+                utterance.onerror = (e) => {
+                  console.error('SpeechSynthesis error:', e);
+                  if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                    socketRef.current.send(JSON.stringify({ event: 'CLIENT_PLAYBACK_FINISHED' }));
+                  }
+                };
+                
+                window.speechSynthesis.speak(utterance);
+              } else {
+                // Immediately notify server that playback is finished when no audio & no SpeechSynthesis
+                if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                  socketRef.current.send(JSON.stringify({ event: 'CLIENT_PLAYBACK_FINISHED' }));
+                }
               }
               break;
             }
@@ -160,6 +187,9 @@ export function useWebSocket() {
       currentAudioRef.current.pause();
       currentAudioRef.current = null;
     }
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
     audioQueueRef.current = [];
     isPlayingRef.current = false;
 
@@ -192,6 +222,9 @@ export function useWebSocket() {
       }
       if (currentAudioRef.current) {
         currentAudioRef.current.pause();
+      }
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
       }
       audioQueueRef.current.forEach((url) => URL.revokeObjectURL(url));
     };
