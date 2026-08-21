@@ -783,9 +783,105 @@ body {
 
 .report-footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding-top: 1.5rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+/* --- PDF Download Button --- */
+.btn-pdf-download {
+  background: linear-gradient(135deg, #10b981 0%, #00f2fe 100%);
+  color: #070913;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.75rem;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-primary);
+  font-size: 1rem;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.35);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-pdf-download::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #00f2fe 0%, #10b981 100%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.btn-pdf-download:hover:not(:disabled)::before {
+  opacity: 1;
+}
+
+.btn-pdf-download:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 242, 254, 0.45);
+}
+
+.btn-pdf-download:active:not(:disabled) {
+  transform: translateY(0px);
+}
+
+.btn-pdf-download:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.btn-pdf-download .btn-icon,
+.btn-pdf-download svg {
+  position: relative;
+  z-index: 1;
+}
+
+.btn-pdf-download span {
+  position: relative;
+  z-index: 1;
+}
+
+/* PDF Spinner */
+.pdf-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgba(7, 9, 19, 0.3);
+  border-top-color: #070913;
+  border-radius: 50%;
+  animation: spin-pdf 0.75s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin-pdf {
+  to { transform: rotate(360deg); }
+}
+
+/* --- Report Timestamp (shown at bottom of captured region) --- */
+.report-timestamp {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.06);
+}
+
+/* Capture zone has its own padding so footer renders cleanly */
+.report-capture-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  padding-bottom: 1rem;
 }
 
 /* --- Error Banners & Helpers --- */
